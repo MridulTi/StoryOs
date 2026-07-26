@@ -1,0 +1,28 @@
+# StoryOS configuration
+# Copy to ~/.config/storyos/storyos.toml or run: storyos init
+
+[data]
+# Directory for the local SQLite database.
+# Supports ~ expansion.
+path = "~/.local/share/storyos"
+
+[capture]
+# Default provenance label for manual captures (journal, voice, git, …).
+default_source = "journal"
+# Where editor captures are saved as markdown files.
+# captures_path = "~/Documents/StoryOS/captures"
+# Optional editor override (e.g. "code --wait", "vim"). Defaults to $VISUAL/$EDITOR/nano.
+# editor = "code --wait"
+
+[outputs]
+# Base directory for generated reel/shorts/youtube scripts.
+# path = "~/Documents/StoryOS/scripts"
+
+[cli]
+# Date/time format for list and show commands.
+datetime_format = "%Y-%m-%d %H:%M"
+
+[integrations.doclog]
+# Import daily captures from DocLogs CLI (~/.doclog/entries/*.yaml).
+enabled = true
+home = "~/.doclog"

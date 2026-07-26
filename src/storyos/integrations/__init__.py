@@ -1,0 +1,1 @@
+"""External capture integrations."""
