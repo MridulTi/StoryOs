@@ -5,6 +5,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from storyos.llm.config import LLMConfig, load_llm_config
 from storyos.multiply.prompt_loader import bundled_prompt_path, resolve_script_prompt_path
 from storyos.paths import default_data_path, expand_path, resolve_config_path
 
@@ -24,6 +25,7 @@ class StoryOSConfig:
     captures_path: Path
     outputs_path: Path
     script_prompt_path: Path
+    llm: LLMConfig
     editor: str | None = None
     doclog: DoclogConfig | None = None
 
@@ -87,6 +89,16 @@ default_source = "journal"
 [cli]
 datetime_format = "%Y-%m-%d %H:%M"
 
+[llm]
+# Default AI provider for `storyos multiply` (cursor, copilot, openai, prompt_only, template).
+provider = "cursor"
+
+[cursor]
+# command = "agent"
+# model = "auto"
+# mode = "ask"
+# timeout_seconds = 120
+
 [integrations.doclog]
 enabled = true
 home = "~/.doclog"
@@ -106,6 +118,7 @@ def load_config(config_path: Path | None = None) -> StoryOSConfig:
             captures_path=data_path / "captures",
             outputs_path=data_path / "outputs",
             script_prompt_path=bundled_prompt_path(),
+            llm=load_llm_config({}),
             editor=None,
             doclog=DoclogConfig(enabled=True, home=_default_doclog_home()),
         )
@@ -136,6 +149,7 @@ def load_config(config_path: Path | None = None) -> StoryOSConfig:
         captures_path=_load_optional_path(capture_section, "captures_path", data_path / "captures"),
         outputs_path=_load_optional_path(outputs_section, "path", data_path / "outputs"),
         script_prompt_path=script_prompt_path,
+        llm=load_llm_config(raw),
         editor=editor,
         doclog=_load_doclog_config(raw),
     )

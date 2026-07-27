@@ -6,9 +6,14 @@ from typing import Annotated, Optional
 import typer
 
 from storyos.cli.discovery_commands import _resolve_candidate
-from storyos.multiply.source import build_story_source
-from storyos.multiply.templates import SUPPORTED_FORMATS, render_all, render_script
-from storyos.multiply.writer import write_all_scripts, write_script
+from storyos.llm.base import ProviderError
+from storyos.llm.registry import PROVIDER_NAMES
+from storyos.multiply.generator import generate_script_content
+from storyos.multiply.source import build_story_bundle, build_story_source
+from storyos.multiply.templates import SUPPORTED_FORMATS
+from storyos.multiply.writer import write_all_scripts, write_generation_outputs
+
+_STORY_IDS_HELP = "Main story id first, then optional background story ids."
 
 
 def register_multiply_commands(
@@ -16,7 +21,9 @@ def register_multiply_commands(
     *,
     load_runtime,
 ) -> None:
-    multiply_app = typer.Typer(help="Create scripts from a discovered story.")
+    multiply_app = typer.Typer(
+        help="Create scripts from a discovered story. Pass extra ids for background context.",
+    )
     app.add_typer(multiply_app, name="multiply")
 
     @multiply_app.callback(invoke_without_command=True)
@@ -27,91 +34,230 @@ def register_multiply_commands(
 
     @multiply_app.command("reel")
     def multiply_reel_command(
-        story_id: Annotated[str, typer.Argument(help="Story id or memory id prefix.")],
+        story_ids: Annotated[list[str], typer.Argument(help=_STORY_IDS_HELP)],
         output: Annotated[
             Optional[Path],
             typer.Option("--output", "-o", help="Write script to this file path."),
         ] = None,
         config: Annotated[Optional[Path], typer.Option("--config")] = None,
+        provider: Annotated[
+            Optional[str],
+            typer.Option("--provider", help=f"LLM provider ({', '.join(PROVIDER_NAMES)})."),
+        ] = None,
+        prompt_only: Annotated[
+            bool,
+            typer.Option("--prompt-only", help="Write a prompt file instead of calling AI."),
+        ] = False,
+        template: Annotated[
+            bool,
+            typer.Option("--template", help="Use built-in template output (no AI)."),
+        ] = False,
+        save_prompt: Annotated[
+            bool,
+            typer.Option("--save-prompt", help="Also save the generation prompt beside the script."),
+        ] = False,
     ) -> None:
         """Create an Instagram Reel script."""
-        _run_multiply(story_id, "reel", output=output, config=config, load_runtime=load_runtime)
+        _run_multiply(
+            story_ids,
+            "reel",
+            output=output,
+            config=config,
+            provider=provider,
+            prompt_only=prompt_only,
+            template=template,
+            save_prompt=save_prompt,
+            load_runtime=load_runtime,
+        )
 
     @multiply_app.command("shorts")
     def multiply_shorts_command(
-        story_id: Annotated[str, typer.Argument(help="Story id or memory id prefix.")],
+        story_ids: Annotated[list[str], typer.Argument(help=_STORY_IDS_HELP)],
         output: Annotated[Optional[Path], typer.Option("--output", "-o")] = None,
         config: Annotated[Optional[Path], typer.Option("--config")] = None,
+        provider: Annotated[Optional[str], typer.Option("--provider")] = None,
+        prompt_only: Annotated[bool, typer.Option("--prompt-only")] = False,
+        template: Annotated[bool, typer.Option("--template")] = False,
+        save_prompt: Annotated[bool, typer.Option("--save-prompt")] = False,
     ) -> None:
         """Create a YouTube Shorts script."""
-        _run_multiply(story_id, "shorts", output=output, config=config, load_runtime=load_runtime)
+        _run_multiply(
+            story_ids,
+            "shorts",
+            output=output,
+            config=config,
+            provider=provider,
+            prompt_only=prompt_only,
+            template=template,
+            save_prompt=save_prompt,
+            load_runtime=load_runtime,
+        )
 
     @multiply_app.command("youtube")
     def multiply_youtube_command(
-        story_id: Annotated[str, typer.Argument(help="Story id or memory id prefix.")],
+        story_ids: Annotated[list[str], typer.Argument(help=_STORY_IDS_HELP)],
         output: Annotated[Optional[Path], typer.Option("--output", "-o")] = None,
         config: Annotated[Optional[Path], typer.Option("--config")] = None,
+        provider: Annotated[Optional[str], typer.Option("--provider")] = None,
+        prompt_only: Annotated[bool, typer.Option("--prompt-only")] = False,
+        template: Annotated[bool, typer.Option("--template")] = False,
+        save_prompt: Annotated[bool, typer.Option("--save-prompt")] = False,
     ) -> None:
         """Create a YouTube video script."""
-        _run_multiply(story_id, "youtube", output=output, config=config, load_runtime=load_runtime)
+        _run_multiply(
+            story_ids,
+            "youtube",
+            output=output,
+            config=config,
+            provider=provider,
+            prompt_only=prompt_only,
+            template=template,
+            save_prompt=save_prompt,
+            load_runtime=load_runtime,
+        )
 
     @multiply_app.command("all")
     def multiply_all_command(
-        story_id: Annotated[str, typer.Argument(help="Story id or memory id prefix.")],
+        story_ids: Annotated[list[str], typer.Argument(help=_STORY_IDS_HELP)],
         output_dir: Annotated[
             Optional[Path],
             typer.Option("--output-dir", "-o", help="Directory for all generated scripts."),
         ] = None,
         config: Annotated[Optional[Path], typer.Option("--config")] = None,
+        provider: Annotated[Optional[str], typer.Option("--provider")] = None,
+        prompt_only: Annotated[bool, typer.Option("--prompt-only")] = False,
+        template: Annotated[bool, typer.Option("--template")] = False,
+        save_prompt: Annotated[bool, typer.Option("--save-prompt")] = False,
     ) -> None:
         """Create reel, shorts, and YouTube scripts at once."""
         settings, memory_store, story_store = load_runtime(config)
-        candidate, memory = _load_story_bundle(story_store, memory_store, story_id)
-        source = build_story_source(candidate, memory)
-        scripts = render_all(source, prompt_path=settings.script_prompt_path)
+        bundle = _load_story_bundle(story_store, memory_store, story_ids)
+
+        scripts: dict[str, str] = {}
+        prompts: dict[str, str] = {}
+        provider_used: str | None = None
+        used_ai = False
+
+        for fmt in SUPPORTED_FORMATS:
+            try:
+                result = generate_script_content(
+                    bundle,
+                    fmt,
+                    llm=settings.llm,
+                    script_prompt_path=settings.script_prompt_path,
+                    provider_override=provider,
+                    prompt_only=prompt_only,
+                    use_template=template,
+                )
+            except (ProviderError, ValueError) as exc:
+                typer.echo(str(exc), err=True)
+                raise typer.Exit(code=1) from exc
+
+            scripts[fmt] = result.content
+            prompts[fmt] = result.prompt
+            provider_used = result.provider
+            used_ai = used_ai or result.used_ai
+
         paths = write_all_scripts(
             settings.outputs_path,
-            story_short_id=candidate.short_id(),
-            title=candidate.title,
+            story_short_id=bundle.main.candidate.short_id(),
+            title=bundle.main.title,
             scripts=scripts,
             output_dir=output_dir,
+            prompts=prompts if save_prompt or prompt_only else None,
         )
-        typer.echo(f"Generated scripts for: {candidate.title}")
+
+        typer.echo(f"Generated scripts for: {bundle.main.title}")
+        if bundle.context:
+            background = ", ".join(item.candidate.short_id() for item in bundle.context)
+            typer.echo(f"  background: {background}")
+        if provider_used:
+            mode = "AI" if used_ai else provider_used
+            typer.echo(f"  provider: {mode}")
         for fmt in SUPPORTED_FORMATS:
             typer.echo(f"  {fmt:<8} {paths[fmt]}")
+            prompt_path = paths.get(f"{fmt}-prompt")
+            if prompt_path:
+                typer.echo(f"           prompt: {prompt_path}")
 
 
 def _run_multiply(
-    story_id: str,
+    story_ids: list[str],
     fmt: str,
     *,
     output: Path | None,
     config: Path | None,
+    provider: str | None,
+    prompt_only: bool,
+    template: bool,
+    save_prompt: bool,
     load_runtime,
 ) -> None:
+    if not story_ids:
+        typer.echo("Pass at least one story id.", err=True)
+        raise typer.Exit(code=1)
+
     settings, memory_store, story_store = load_runtime(config)
-    candidate, memory = _load_story_bundle(story_store, memory_store, story_id)
-    source = build_story_source(candidate, memory)
-    content = render_script(source, fmt, prompt_path=settings.script_prompt_path)
-    path = write_script(
+    bundle = _load_story_bundle(story_store, memory_store, story_ids)
+
+    try:
+        result = generate_script_content(
+            bundle,
+            fmt,
+            llm=settings.llm,
+            script_prompt_path=settings.script_prompt_path,
+            provider_override=provider,
+            prompt_only=prompt_only,
+            use_template=template,
+        )
+    except (ProviderError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    paths = write_generation_outputs(
         settings.outputs_path,
         fmt=fmt,
-        story_short_id=candidate.short_id(),
-        title=candidate.title,
-        content=content,
+        story_short_id=bundle.main.candidate.short_id(),
+        title=bundle.main.title,
+        content=result.content,
+        prompt=result.prompt,
         output=output,
+        save_prompt=save_prompt or prompt_only,
     )
-    typer.echo(f"Generated {fmt} script for: {candidate.title}")
-    typer.echo(f"  file: {path}")
+
+    mode = "AI" if result.used_ai else result.provider
+    typer.echo(f"Generated {fmt} script for: {bundle.main.title}")
+    if bundle.context:
+        background = ", ".join(item.candidate.short_id() for item in bundle.context)
+        typer.echo(f"  background: {background}")
+    typer.echo(f"  provider: {mode}")
+    typer.echo(f"  file: {paths['script']}")
+    if paths.get("prompt"):
+        typer.echo(f"  prompt: {paths['prompt']}")
 
 
-def _load_story_bundle(story_store, memory_store, story_id: str):
+def _load_story_bundle(story_store, memory_store, story_ids: list[str]) -> StoryBundle:
+    candidate, memory = _load_story_pair(story_store, memory_store, story_ids[0], label="Story")
+    main = build_story_source(candidate, memory)
+    context: list = []
+    for story_id in story_ids[1:]:
+        ctx_candidate, ctx_memory = _load_story_pair(
+            story_store,
+            memory_store,
+            story_id,
+            label="Background story",
+        )
+        context.append(build_story_source(ctx_candidate, ctx_memory))
+    return build_story_bundle(main, *context)
+
+
+def _load_story_pair(story_store, memory_store, story_id: str, *, label: str):
     candidate = _resolve_candidate(story_store, story_id)
     if candidate is None:
-        typer.echo(f"Story not found: {story_id}", err=True)
+        typer.echo(f"{label} not found: {story_id}", err=True)
         raise typer.Exit(code=1)
     memory = memory_store.get(candidate.memory_id)
     if memory is None:
-        typer.echo(f"Memory not found for story: {story_id}", err=True)
+        typer.echo(f"Memory not found for {label.lower()}: {story_id}", err=True)
         raise typer.Exit(code=1)
     return candidate, memory

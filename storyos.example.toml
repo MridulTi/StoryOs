@@ -24,6 +24,21 @@ default_source = "journal"
 # Date/time format for list and show commands.
 datetime_format = "%Y-%m-%d %H:%M"
 
+[llm]
+# Default provider for `storyos multiply` (cursor, copilot, openai, prompt_only, template).
+# Falls back to ~/.doclog/config.yaml when sections below are omitted.
+provider = "cursor"
+
+[cursor]
+# command = "agent"
+# model = "auto"
+# mode = "ask"
+# timeout_seconds = 120
+
+[openai]
+# api_key = "${OPENAI_API_KEY}"
+# model = "gpt-4o-mini"
+
 [integrations.doclog]
 # Import daily captures from DocLogs CLI (~/.doclog/entries/*.yaml).
 enabled = true

@@ -49,6 +49,29 @@ class StorySource:
         return _trim(self.body, 320)
 
 
+@dataclass(frozen=True)
+class StoryBundle:
+    """Main story plus optional background/context stories."""
+
+    main: StorySource
+    context: tuple[StorySource, ...] = ()
+
+    @property
+    def title(self) -> str:
+        return self.main.title
+
+    def background_text(self, *, limit: int = 1200) -> str:
+        """Combined text from background stories only."""
+        if not self.context:
+            return _trim(self.main.context, limit)
+
+        parts: list[str] = []
+        for item in self.context:
+            parts.append(f"{item.title}\n{item.memory.content.strip()}")
+        combined = "\n\n".join(part.strip() for part in parts if part.strip())
+        return _trim(combined, limit) if limit else combined
+
+
 def build_story_source(candidate: StoryCandidate, memory: Memory) -> StorySource:
     fields = parse_structured_fields(memory.content)
     body = _strip_structured_header(memory.content)
@@ -61,6 +84,17 @@ def build_story_source(candidate: StoryCandidate, memory: Memory) -> StorySource
         remember=fields.remember,
         body=body,
     )
+
+
+def build_story_bundle(main: StorySource, *context: StorySource) -> StoryBundle:
+    seen = {main.memory.id}
+    background: list[StorySource] = []
+    for item in context:
+        if item.memory.id in seen:
+            continue
+        seen.add(item.memory.id)
+        background.append(item)
+    return StoryBundle(main=main, context=tuple(background))
 
 
 def _strip_structured_header(content: str) -> str:

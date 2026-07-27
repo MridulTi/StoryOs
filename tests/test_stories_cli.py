@@ -52,7 +52,10 @@ def test_discover_and_stories_flow(tmp_path: Path) -> None:
     assert pick_result.exit_code == 0, pick_result.output
     assert "Picked story" in pick_result.stdout
 
-    multiply_result = runner.invoke(app, ["multiply", "all", story_id, *config_args])
+    multiply_result = runner.invoke(
+        app,
+        ["multiply", "all", story_id, *config_args, "--template"],
+    )
     assert multiply_result.exit_code == 0, multiply_result.output
     assert "reel" in multiply_result.stdout
     assert "youtube" in multiply_result.stdout

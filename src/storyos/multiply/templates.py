@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from storyos.multiply.source import StorySource
+from storyos.multiply.source import StoryBundle, StorySource
 
 SUPPORTED_FORMATS = ("reel", "shorts", "youtube")
 
@@ -13,16 +13,28 @@ FORMAT_LABELS = {
 }
 
 
-def render_script(source: StorySource, fmt: str, *, prompt_path: Path | None = None) -> str:
+def render_script(
+    source: StorySource | StoryBundle,
+    fmt: str,
+    *,
+    prompt_path: Path | None = None,
+) -> str:
+    bundle = _as_bundle(source)
+    main = bundle.main
     normalized = fmt.strip().lower()
     if normalized not in SUPPORTED_FORMATS:
         raise ValueError(f"Unsupported format {fmt!r}. Choose from: reel, shorts, youtube.")
 
     prompt_ref = str(prompt_path) if prompt_path else "storyos script prompt"
-    sections = _story_discovery(source)
-    scenes = _scenes_for_format(source, normalized)
+    sections = _story_discovery(main)
+    scenes = _scenes_for_format(bundle, normalized)
 
-    return f"""# {source.title} — {FORMAT_LABELS[normalized]}
+    context_note = ""
+    if bundle.context:
+        ids = ", ".join(item.candidate.short_id() for item in bundle.context)
+        context_note = f"\n- background: `{ids}`"
+
+    return f"""# {main.title} — {FORMAT_LABELS[normalized]}
 
 > Generated with StoryOS script prompt: `{prompt_ref}`  
 > Rules: discover the story in the capture — **never invent experiences**. Edit before recording.
@@ -45,13 +57,13 @@ def render_script(source: StorySource, fmt: str, *, prompt_path: Path | None = N
 
 ## Title
 
-{source.title}
+{main.title}
 
 ---
 
 ## Hook
 
-"{source.hook}"
+"{main.hook}"
 
 Open with a **moment**, not a lesson. The audience should immediately wonder: *What happened?*
 
@@ -68,9 +80,9 @@ Open with a **moment**, not a lesson. The audience should immediately wonder: *W
 Do not end with advice. Leave emotional space.
 
 **Closing line (from your capture):**  
-"{source.candidate.potential_ending or source.lesson}"
+"{main.candidate.potential_ending or main.lesson}"
 
-**Lingering image idea:** {_lingering_image(source)}
+**Lingering image idea:** {_lingering_image(main)}
 
 ---
 
@@ -84,7 +96,7 @@ Do not end with advice. Leave emotional space.
 
 ## Music Direction
 
-**Mood:** {_music_mood(source)}  
+**Mood:** {_music_mood(main)}  
 **Tempo:** Slow burn with one lift at the turn  
 **Emotional progression:** Curiosity → connection → reflection → silence
 
@@ -92,30 +104,36 @@ Do not end with advice. Leave emotional space.
 
 ## Source
 
-- story: `{source.candidate.id}`
-- memory: `{source.memory.id}`
+- story: `{main.candidate.id}`
+- memory: `{main.memory.id}`{context_note}
 - prompt: `{prompt_ref}`
-- score: {source.candidate.score}/100
+- score: {main.candidate.score}/100
 """
 
 
-def render_all(source: StorySource, *, prompt_path: Path | None = None) -> dict[str, str]:
+def render_all(source: StorySource | StoryBundle, *, prompt_path: Path | None = None) -> dict[str, str]:
     return {
         fmt: render_script(source, fmt, prompt_path=prompt_path)
         for fmt in SUPPORTED_FORMATS
     }
 
 
-def render_reel_script(source: StorySource, *, prompt_path: Path | None = None) -> str:
+def render_reel_script(source: StorySource | StoryBundle, *, prompt_path: Path | None = None) -> str:
     return render_script(source, "reel", prompt_path=prompt_path)
 
 
-def render_shorts_script(source: StorySource, *, prompt_path: Path | None = None) -> str:
+def render_shorts_script(source: StorySource | StoryBundle, *, prompt_path: Path | None = None) -> str:
     return render_script(source, "shorts", prompt_path=prompt_path)
 
 
-def render_youtube_script(source: StorySource, *, prompt_path: Path | None = None) -> str:
+def render_youtube_script(source: StorySource | StoryBundle, *, prompt_path: Path | None = None) -> str:
     return render_script(source, "youtube", prompt_path=prompt_path)
+
+
+def _as_bundle(source: StorySource | StoryBundle) -> StoryBundle:
+    if isinstance(source, StoryBundle):
+        return source
+    return StoryBundle(main=source)
 
 
 def _story_discovery(source: StorySource) -> dict[str, str]:
@@ -128,12 +146,14 @@ def _story_discovery(source: StorySource) -> dict[str, str]:
     }
 
 
-def _scenes_for_format(source: StorySource, fmt: str) -> list[dict[str, str]]:
+def _scenes_for_format(bundle: StoryBundle, fmt: str) -> list[dict[str, str]]:
+    source = bundle.main
+    background = bundle.background_text(limit=420 if fmt == "youtube" else 200)
     if fmt == "reel":
         return [
             _scene("Moment", "0:00–0:03", source.hook, "Close-up or bold text overlay", "Direct to camera"),
             _scene("Curiosity", "0:03–0:10", source.candidate.conflict, "Quick cut b-roll", "Handheld"),
-            _scene("Conflict", "0:10–0:22", _short_line(source.context, 180), "Workspace / incident footage", "Screen glow"),
+            _scene("Conflict", "0:10–0:22", _short_line(background or source.context, 180), "Workspace / incident footage", "Screen glow"),
             _scene("Discovery", "0:22–0:35", source.turn, "The fix or turning point", "Static then push-in"),
             _scene("Reflection", "0:35–0:45", source.lesson, "Calmer frame, same as open for loop", "Soft natural light"),
         ]
@@ -141,14 +161,14 @@ def _scenes_for_format(source: StorySource, fmt: str) -> list[dict[str, str]]:
         return [
             _scene("Moment", "0:00–0:05", source.hook, "Cold open, large on-screen text", "Direct to camera"),
             _scene("Curiosity", "0:05–0:15", source.candidate.conflict, "Fast b-roll", "Handheld energy"),
-            _scene("Story", "0:15–0:30", _short_line(source.context, 200), "Screen or environment", "Mixed"),
+            _scene("Story", "0:15–0:30", _short_line(background or source.context, 200), "Screen or environment", "Mixed"),
             _scene("Discovery", "0:30–0:45", source.turn, "One clear turning-point shot", "Contrast lighting"),
             _scene("Open Ending", "0:45–0:60", source.lesson, "Hold on face or empty frame", "Quiet, still"),
         ]
     return [
         _scene("Moment", "0:00–0:20", source.hook, "Open on the strongest physical detail", "Direct to camera"),
         _scene("Curiosity", "0:20–1:00", source.candidate.conflict, "Establish the stakes visually", "Observational"),
-        _scene("Story", "1:00–2:30", _short_line(source.context, 420), "B-roll from your library", "Natural movement"),
+        _scene("Story", "1:00–2:30", _short_line(background or source.context, 420), "B-roll from your library", "Natural movement"),
         _scene("Conflict", "2:30–4:00", _bullet_narration(source.blockers), "Incident / problem visuals", "Tighter, tense"),
         _scene("Discovery", "4:00–5:30", source.turn, "Show what changed", "Release in framing"),
         _scene("Reflection", "5:30–6:30", source.lesson, "Return to narrator, slower pace", "Soft, intimate"),
