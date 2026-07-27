@@ -5,6 +5,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from storyos.multiply.prompt_loader import bundled_prompt_path, resolve_script_prompt_path
 from storyos.paths import default_data_path, expand_path, resolve_config_path
 
 
@@ -22,6 +23,7 @@ class StoryOSConfig:
     config_path: Path
     captures_path: Path
     outputs_path: Path
+    script_prompt_path: Path
     editor: str | None = None
     doclog: DoclogConfig | None = None
 
@@ -77,8 +79,10 @@ default_source = "journal"
 # captures_path = "{data_path}/captures"
 
 [outputs]
-# Base directory for generated scripts (creates reel/, shorts/, youtube/ inside).
+# Base directory for generated reel/shorts/youtube scripts.
 # path = "{data_path}/outputs"
+# Script prompt used to shape generated scripts (defaults to bundled prompt, or storypromt.md beside config).
+# script_prompt = "storypromt.md"
 
 [cli]
 datetime_format = "%Y-%m-%d %H:%M"
@@ -101,6 +105,7 @@ def load_config(config_path: Path | None = None) -> StoryOSConfig:
             config_path=path,
             captures_path=data_path / "captures",
             outputs_path=data_path / "outputs",
+            script_prompt_path=bundled_prompt_path(),
             editor=None,
             doclog=DoclogConfig(enabled=True, home=_default_doclog_home()),
         )
@@ -118,6 +123,11 @@ def load_config(config_path: Path | None = None) -> StoryOSConfig:
     editor = str(editor_raw).strip() if editor_raw else None
     if editor == "":
         editor = None
+    script_prompt_raw = outputs_section.get("script_prompt")
+    script_prompt_path = resolve_script_prompt_path(
+        config_path=path,
+        configured=str(script_prompt_raw) if script_prompt_raw else None,
+    )
     return StoryOSConfig(
         data_path=data_path,
         default_source=str(capture_section.get("default_source", "journal")),
@@ -125,6 +135,7 @@ def load_config(config_path: Path | None = None) -> StoryOSConfig:
         config_path=path,
         captures_path=_load_optional_path(capture_section, "captures_path", data_path / "captures"),
         outputs_path=_load_optional_path(outputs_section, "path", data_path / "outputs"),
+        script_prompt_path=script_prompt_path,
         editor=editor,
         doclog=_load_doclog_config(raw),
     )

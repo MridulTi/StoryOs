@@ -277,6 +277,7 @@ def config_path_command(
     typer.echo(f"db:     {settings.database_path}")
     typer.echo(f"captures: {settings.captures_path}")
     typer.echo(f"outputs:  {settings.outputs_path}")
+    typer.echo(f"prompt:   {settings.script_prompt_path}")
     if settings.doclog and settings.doclog.enabled:
         typer.echo(f"doclog: {settings.doclog.home / 'entries'}")
     elif settings.doclog:

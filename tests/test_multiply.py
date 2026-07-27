@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from storyos.capture.manual import capture_from_text
 from storyos.engine.analyzer import analyze_memory
 from storyos.multiply.source import build_story_source
@@ -22,16 +24,15 @@ def test_render_scripts_use_source_material_only() -> None:
     assert candidate is not None
 
     source = build_story_source(candidate, memory)
-    reel = render_reel_script(source)
-    youtube = render_youtube_script(source)
+    reel = render_reel_script(source, prompt_path=Path("/tmp/storypromt.md"))
+    youtube = render_youtube_script(source, prompt_path=Path("/tmp/storypromt.md"))
 
     assert "Production incident after hours" in reel
     assert "Nobody asked me to sacrifice myself" in reel
-    assert "Got paged at 2AM" not in reel or "2AM" in youtube or "praise" in youtube
-    assert "Instagram Reel Script" in reel
-    assert "YouTube Script" in youtube
-    assert candidate.id in reel
-    assert memory.id in youtube
+    assert "## Story Discovery" in reel
+    assert "## Full Script" in youtube
+    assert "## Shot Suggestions" in youtube
+    assert "storypromt.md" in reel
 
 
 def test_render_all_formats() -> None:

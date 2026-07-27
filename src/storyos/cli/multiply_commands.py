@@ -68,7 +68,7 @@ def register_multiply_commands(
         settings, memory_store, story_store = load_runtime(config)
         candidate, memory = _load_story_bundle(story_store, memory_store, story_id)
         source = build_story_source(candidate, memory)
-        scripts = render_all(source)
+        scripts = render_all(source, prompt_path=settings.script_prompt_path)
         paths = write_all_scripts(
             settings.outputs_path,
             story_short_id=candidate.short_id(),
@@ -92,7 +92,7 @@ def _run_multiply(
     settings, memory_store, story_store = load_runtime(config)
     candidate, memory = _load_story_bundle(story_store, memory_store, story_id)
     source = build_story_source(candidate, memory)
-    content = render_script(source, fmt)
+    content = render_script(source, fmt, prompt_path=settings.script_prompt_path)
     path = write_script(
         settings.outputs_path,
         fmt=fmt,

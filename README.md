@@ -51,6 +51,7 @@ Configuration lives in `storyos.toml` (see [storyos.example.toml](storyos.exampl
 - **Data:** path from `[data].path` in that file (SQLite at `memories.db`)
 - **Captures:** `[capture].captures_path` (default: `{data}/captures`)
 - **Scripts:** `[outputs].path` (default: `{data}/outputs`, with `reel/`, `shorts/`, `youtube/` inside)
+- **Script prompt:** `[outputs].script_prompt` (defaults to bundled prompt, or `storypromt.md` beside config)
 
 Set `[capture].editor` in TOML (or `$EDITOR`) for editor-based capture. Quick capture still works: `storyos capture "short note"`.
 
@@ -62,6 +63,7 @@ captures_path = "~/Documents/StoryOS/captures"
 
 [outputs]
 path = "~/Documents/StoryOS/scripts"
+script_prompt = "~/Documents/personal/StoryOS/storypromt.md"
 ```
 
 Check active paths anytime: `storyos config path`

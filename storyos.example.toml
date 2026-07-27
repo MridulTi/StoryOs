@@ -17,6 +17,8 @@ default_source = "journal"
 [outputs]
 # Base directory for generated reel/shorts/youtube scripts.
 # path = "~/Documents/StoryOS/scripts"
+# Script prompt that shapes generated scripts (your cinematic writer rules).
+# script_prompt = "~/Documents/personal/StoryOS/storypromt.md"
 
 [cli]
 # Date/time format for list and show commands.
