@@ -17,6 +17,20 @@ Read `context/index.md` before making non-trivial changes to understand prior de
 - Python package: `src/storyos/` (install with `pip install -e ".[dev]"`)
 - CLI entry point: `storyos` → `storyos.cli.app:main`
 - Config: TOML at `~/.config/storyos/storyos.toml` (see `storyos.example.toml`)
+- Runtime stores: `runtime.py` wires memory, story, developed, graph, and media stores (SQLite)
+
+### Key modules
+
+| Module | Purpose |
+|---|---|
+| `companion/` | Interview questions and editor-based Q&A |
+| `store/developed_store.py` | Developed stories from Companion |
+| `graph/` | Related memory heuristics |
+| `store/graph_store.py` | Memory edges and journeys |
+| `integrations/` | DocLogs and git sync connectors |
+| `multiply/` | AI/template script generation |
+| `patterns/` | Theme clustering and resurfacing |
+| `media/`, `storyboard/` | Media index and storyboard builder |
 
 ## Working principles
 

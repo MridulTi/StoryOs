@@ -43,3 +43,12 @@ provider = "cursor"
 # Import daily captures from DocLogs CLI (~/.doclog/entries/*.yaml).
 enabled = true
 home = "~/.doclog"
+
+[integrations.git]
+enabled = false
+# repo = "."
+# since_days = 7
+
+[multiply]
+# Auto-attach top N related stories as background when multiplying.
+# auto_context = 2

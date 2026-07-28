@@ -17,15 +17,16 @@ from storyos.capture.editor import (
 from storyos.capture.manual import capture_from_text, read_stdin_content
 from storyos.capture.template import ParsedCapture
 from storyos.config import StoryOSConfig, init_config, load_config
-from storyos.cli.discovery_commands import (
-    register_develop_alias,
-    register_discovery_commands,
-    register_story_commands,
-)
+from storyos.cli.develop_commands import register_develop_command
+from storyos.cli.discovery_commands import register_discovery_commands, register_story_commands
+from storyos.cli.graph_commands import register_graph_commands
+from storyos.cli.media_commands import register_media_commands
 from storyos.cli.multiply_commands import register_multiply_commands
+from storyos.integrations.base import SyncResult
 from storyos.integrations.doclog import sync_doclog_entries
+from storyos.integrations.git import sync_git_commits
+from storyos.runtime import load_runtime
 from storyos.store.memory_store import MemoryStore
-from storyos.store.story_store import StoryStore
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -41,22 +42,20 @@ app.add_typer(config_app, name="config")
 app.add_typer(sync_app, name="sync")
 
 
-def _load_runtime(config: Path | None) -> tuple[StoryOSConfig, MemoryStore, StoryStore]:
-    settings = load_config(config)
-    settings.data_path.mkdir(parents=True, exist_ok=True)
-    memory_store = MemoryStore(settings.database_path)
-    story_store = StoryStore(settings.database_path)
-    return settings, memory_store, story_store
+def _load_runtime(config: Path | None):
+    return load_runtime(config)
 
 
 def _format_dt(value: datetime, fmt: str) -> str:
     return value.strftime(fmt)
 
 
-register_discovery_commands(app, load_runtime=_load_runtime, format_dt=_format_dt)
-register_develop_alias(app, load_runtime=_load_runtime)
-register_story_commands(stories_app, load_runtime=_load_runtime, format_dt=_format_dt)
-register_multiply_commands(app, load_runtime=_load_runtime)
+register_discovery_commands(app, load_runtime=load_runtime, format_dt=_format_dt)
+register_develop_command(app)
+register_story_commands(stories_app, load_runtime=load_runtime, format_dt=_format_dt)
+register_graph_commands(stories_app, app)
+register_multiply_commands(app)
+register_media_commands(app)
 
 
 @app.callback()
@@ -122,7 +121,9 @@ def capture_command(
     ] = None,
 ) -> None:
     """Capture a memory — opens an editor with a template by default."""
-    settings, store, _ = _load_runtime(config)
+    runtime = _load_runtime(config)
+    settings = runtime.settings
+    store = runtime.memory_store
     resolved_source = source or settings.default_source
     resolved_editor = editor or settings.editor
 
@@ -189,7 +190,9 @@ def memories_list_command(
     config: Annotated[Optional[Path], typer.Option("--config")] = None,
 ) -> None:
     """List recent memories."""
-    settings, store, _ = _load_runtime(config)
+    runtime = _load_runtime(config)
+    settings = runtime.settings
+    store = runtime.memory_store
     items = store.list_recent(limit=limit)
 
     if not items:
@@ -216,7 +219,9 @@ def memories_show_command(
     config: Annotated[Optional[Path], typer.Option("--config")] = None,
 ) -> None:
     """Show one memory in full."""
-    settings, store, _ = _load_runtime(config)
+    runtime = _load_runtime(config)
+    settings = runtime.settings
+    store = runtime.memory_store
     try:
         memory = store.get(memory_id)
     except ValueError as exc:
@@ -245,7 +250,9 @@ def memories_search_command(
     config: Annotated[Optional[Path], typer.Option("--config")] = None,
 ) -> None:
     """Search captured memories."""
-    settings, store, _ = _load_runtime(config)
+    runtime = _load_runtime(config)
+    settings = runtime.settings
+    store = runtime.memory_store
     items = store.search(query, limit=limit)
 
     if not items:
@@ -279,6 +286,7 @@ def config_path_command(
     typer.echo(f"outputs:  {settings.outputs_path}")
     typer.echo(f"prompt:   {settings.script_prompt_path}")
     typer.echo(f"llm:      {settings.llm.provider}")
+    typer.echo(f"multiply: auto_context={settings.multiply.auto_context}")
     if settings.doclog and settings.doclog.enabled:
         typer.echo(f"doclog: {settings.doclog.home / 'entries'}")
     elif settings.doclog:
@@ -293,7 +301,15 @@ def sync_default(
     """Import from all enabled integrations."""
     if ctx.invoked_subcommand is not None:
         return
-    _run_doclog_sync(config)
+    _run_all_sync(config)
+
+
+@sync_app.command("all")
+def sync_all_command(
+    config: Annotated[Optional[Path], typer.Option("--config")] = None,
+) -> None:
+    """Import from all enabled integrations."""
+    _run_all_sync(config)
 
 
 @sync_app.command("doclog")
@@ -304,13 +320,46 @@ def sync_doclog_command(
     _run_doclog_sync(config)
 
 
+def _run_all_sync(config: Path | None) -> None:
+    runtime = load_runtime(config)
+    total = SyncResult()
+    if runtime.settings.doclog and runtime.settings.doclog.enabled:
+        try:
+            result = sync_doclog_entries(runtime.memory_store, runtime.settings.doclog.home)
+            total = SyncResult(
+                created=total.created + result.created,
+                updated=total.updated + result.updated,
+                skipped=total.skipped + result.skipped,
+            )
+            typer.echo(f"DocLogs: created={result.created} updated={result.updated} skipped={result.skipped}")
+        except FileNotFoundError as exc:
+            typer.echo(str(exc), err=True)
+    if runtime.settings.git and runtime.settings.git.enabled and runtime.settings.git.repo:
+        try:
+            result = sync_git_commits(
+                runtime.memory_store,
+                repo_path=runtime.settings.git.repo,
+                since_days=runtime.settings.git.since_days,
+            )
+            total = SyncResult(
+                created=total.created + result.created,
+                updated=total.updated + result.updated,
+                skipped=total.skipped + result.skipped,
+            )
+            typer.echo(f"Git: created={result.created} updated={result.updated} skipped={result.skipped}")
+        except (FileNotFoundError, RuntimeError) as exc:
+            typer.echo(str(exc), err=True)
+    typer.echo(f"Total: created={total.created} updated={total.updated} skipped={total.skipped}")
+
+
 def _run_doclog_sync(config: Path | None) -> None:
-    settings = load_config(config)
+    runtime = load_runtime(config)
+    settings = runtime.settings
     if settings.doclog is None or not settings.doclog.enabled:
         typer.echo("DocLogs integration is disabled in storyos.toml.", err=True)
         raise typer.Exit(code=1)
 
-    _, store, _ = _load_runtime(config)
+    store = runtime.memory_store
     try:
         result = sync_doclog_entries(store, settings.doclog.home)
     except FileNotFoundError as exc:
@@ -318,6 +367,31 @@ def _run_doclog_sync(config: Path | None) -> None:
         raise typer.Exit(code=1) from exc
 
     typer.echo(f"DocLogs sync from {settings.doclog.home / 'entries'}")
+    typer.echo(f"  created: {result.created}")
+    typer.echo(f"  updated: {result.updated}")
+    typer.echo(f"  skipped: {result.skipped}")
+
+
+@sync_app.command("git")
+def sync_git_command(
+    repo: Annotated[Optional[Path], typer.Option("--repo", help="Git repository path.")] = None,
+    since_days: Annotated[int, typer.Option("--since", min=1, max=365)] = 7,
+    config: Annotated[Optional[Path], typer.Option("--config")] = None,
+) -> None:
+    """Import recent git commits as background memories."""
+    runtime = load_runtime(config)
+    settings = runtime.settings
+    repo_path = repo or (settings.git.repo if settings.git else None) or Path.cwd()
+    try:
+        result = sync_git_commits(
+            runtime.memory_store,
+            repo_path=repo_path,
+            since_days=since_days,
+        )
+    except (FileNotFoundError, RuntimeError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"Git sync from {repo_path}")
     typer.echo(f"  created: {result.created}")
     typer.echo(f"  updated: {result.updated}")
     typer.echo(f"  skipped: {result.skipped}")

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from storyos.multiply.templates import SUPPORTED_FORMATS, render_all, render_script
+from storyos.multiply.templates import render_all, render_script
 
 
 def slugify(value: str, *, limit: int = 48) -> str:
@@ -120,7 +120,7 @@ def write_all_scripts(
     prompts: dict[str, str] | None = None,
 ) -> dict[str, Path]:
     written: dict[str, Path] = {}
-    for fmt in SUPPORTED_FORMATS:
+    for fmt in scripts:
         content = scripts[fmt]
         if output_dir is not None:
             path = output_dir / f"{story_short_id}-{slugify(title)}-{fmt}.md"

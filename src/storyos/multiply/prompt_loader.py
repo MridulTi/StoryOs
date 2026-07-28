@@ -11,6 +11,17 @@ def bundled_prompt_path() -> Path:
     return Path(__file__).resolve().parent.parent / "prompts" / "script_writer.md"
 
 
+def bundled_format_prompt_path(fmt: str) -> Path:
+    return Path(__file__).resolve().parent.parent / "prompts" / f"{fmt}.md"
+
+
+def resolve_format_prompt(fmt: str, *, script_prompt_path: Path) -> str:
+    format_path = bundled_format_prompt_path(fmt)
+    if format_path.is_file():
+        return load_script_prompt(str(format_path))
+    return load_script_prompt(str(script_prompt_path))
+
+
 def resolve_script_prompt_path(
     *,
     config_path: Path,

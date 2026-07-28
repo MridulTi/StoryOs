@@ -6,7 +6,8 @@ from pathlib import Path
 from storyos.llm.base import ProviderError
 from storyos.llm.config import LLMConfig
 from storyos.llm.registry import get_provider, resolve_provider_name
-from storyos.multiply.prompt_builder import build_generation_prompt, wrap_generated_script
+from storyos.models.developed_story import DevelopedStory
+from storyos.multiply.prompt_builder import build_generation_prompt, check_shareability, wrap_generated_script
 from storyos.multiply.source import StoryBundle, StorySource
 from storyos.multiply.templates import render_script
 
@@ -29,8 +30,15 @@ def generate_script_content(
     provider_override: str | None = None,
     prompt_only: bool = False,
     use_template: bool = False,
+    developed: DevelopedStory | None = None,
 ) -> GenerationResult:
-    prompt = build_generation_prompt(source, fmt, script_prompt_path=script_prompt_path)
+    check_shareability(fmt, developed)
+    prompt = build_generation_prompt(
+        source,
+        fmt,
+        script_prompt_path=script_prompt_path,
+        developed=developed,
+    )
     provider_name = resolve_provider_name(
         provider_override,
         prompt_only=prompt_only,
@@ -59,6 +67,7 @@ def generate_script_content(
         fmt=fmt,
         provider=provider_name,
         prompt_path=script_prompt_path,
+        developed=developed,
     )
     return GenerationResult(content=content, provider=provider_name, prompt=prompt, used_ai=True)
 

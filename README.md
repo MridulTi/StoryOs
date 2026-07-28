@@ -121,7 +121,18 @@ src/storyos/
 
 ## Status
 
-Phase 1 — manual capture + local memory store + CLI. Phase 2 — `discover` + `stories` commands with rule-based Story Engine scoring.
+| Phase | Feature | CLI |
+|---|---|---|
+| 1 | Capture + memory store | `capture`, `memories`, `sync doclog` |
+| 2 | Story discovery | `discover`, `stories`, `today` |
+| 3 | Story Companion | `develop` |
+| 4 | Memory graph + timeline | `stories related`, `stories link`, `timeline` |
+| 5 | Connectors | `sync`, `sync git`, `sync doclog` |
+| 6 | Content multiplication | `multiply reel/shorts/youtube/journal/linkedin/...`, `multiply all-formats` |
+| 7 | Visual story assistant | `media scan`, `storyboard` |
+| 8 | Long-term memory | `patterns`, `stories dormant`, `discover --resurface` |
+
+Main + background stories: `storyos multiply all <main-id> <bg-id>...` or `--with-related`.
 
 ## For agents
 

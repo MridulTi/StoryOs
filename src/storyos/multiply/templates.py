@@ -2,15 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from storyos.multiply.formats import ALL_FORMATS, FORMAT_LABELS, VIDEO_FORMATS
 from storyos.multiply.source import StoryBundle, StorySource, as_bundle
 
-SUPPORTED_FORMATS = ("reel", "shorts", "youtube")
-
-FORMAT_LABELS = {
-    "reel": "Instagram Reel (30–45s vertical)",
-    "shorts": "YouTube Shorts (45–60s vertical, 9:16)",
-    "youtube": "YouTube (5–8 minutes)",
-}
+SUPPORTED_FORMATS = ALL_FORMATS
 
 
 def render_script(
@@ -23,7 +18,7 @@ def render_script(
     main = bundle.main
     normalized = fmt.strip().lower()
     if normalized not in SUPPORTED_FORMATS:
-        raise ValueError(f"Unsupported format {fmt!r}. Choose from: reel, shorts, youtube.")
+        raise ValueError(f"Unsupported format {fmt!r}. Choose from: {', '.join(SUPPORTED_FORMATS)}.")
 
     prompt_ref = str(prompt_path) if prompt_path else "storyos script prompt"
     sections = _story_discovery(main)
@@ -32,6 +27,9 @@ def render_script(
     if bundle.context:
         ids = ", ".join(bundle.context_story_ids())
         context_line = f"\n- background stories: `{ids}`"
+
+    if normalized in {"journal", "linkedin", "blog", "newsletter", "podcast"}:
+        return _render_text_format(bundle, normalized, prompt_ref=prompt_ref, sections=sections)
 
     return f"""# {main.title} — {FORMAT_LABELS[normalized]}
 
@@ -143,6 +141,47 @@ def render_youtube_script(
     prompt_path: Path | None = None,
 ) -> str:
     return render_script(source, "youtube", prompt_path=prompt_path)
+
+
+def _render_text_format(
+    bundle: StoryBundle,
+    fmt: str,
+    *,
+    prompt_ref: str,
+    sections: dict[str, str],
+) -> str:
+    main = bundle.main
+    context_line = ""
+    if bundle.context:
+        ids = ", ".join(bundle.context_story_ids())
+        context_line = f"\n- background stories: `{ids}`"
+    body_hint = _short_line(bundle.background_text() or main.body, 500)
+    return f"""# {main.title} — {FORMAT_LABELS[fmt]}
+
+> Template output from StoryOS — edit before sharing.
+
+---
+
+## Story
+
+{sections["core_story"]}
+
+## Draft
+
+{body_hint}
+
+## Insight
+
+{sections["why_it_matters"]}
+
+---
+
+## Source
+
+- main story: `{main.candidate.id}`
+- main memory: `{main.memory.id}`{context_line}
+- prompt: `{prompt_ref}`
+"""
 
 
 def _story_discovery(source: StorySource) -> dict[str, str]:

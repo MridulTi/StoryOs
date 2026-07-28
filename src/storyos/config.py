@@ -17,6 +17,18 @@ class DoclogConfig:
 
 
 @dataclass(frozen=True)
+class GitConfig:
+    enabled: bool
+    repo: Path | None
+    since_days: int
+
+
+@dataclass(frozen=True)
+class MultiplyConfig:
+    auto_context: int
+
+
+@dataclass(frozen=True)
 class StoryOSConfig:
     data_path: Path
     default_source: str
@@ -26,8 +38,10 @@ class StoryOSConfig:
     outputs_path: Path
     script_prompt_path: Path
     llm: LLMConfig
+    multiply: MultiplyConfig
     editor: str | None = None
     doclog: DoclogConfig | None = None
+    git: GitConfig | None = None
 
     @property
     def database_path(self) -> Path:
@@ -51,6 +65,24 @@ def _load_doclog_config(raw: dict) -> DoclogConfig | None:
     home_raw = doclog_section.get("home")
     home = expand_path(str(home_raw)) if home_raw else _default_doclog_home()
     return DoclogConfig(enabled=enabled, home=home)
+
+
+def _load_git_config(raw: dict) -> GitConfig | None:
+    integrations = raw.get("integrations") or {}
+    git_section = integrations.get("git")
+    if git_section is None:
+        return GitConfig(enabled=False, repo=None, since_days=7)
+    enabled = bool(git_section.get("enabled", False))
+    repo_raw = git_section.get("repo")
+    repo = expand_path(str(repo_raw)) if repo_raw else None
+    since_days = int(git_section.get("since_days", 7))
+    return GitConfig(enabled=enabled, repo=repo, since_days=since_days)
+
+
+def _load_multiply_config(raw: dict) -> MultiplyConfig:
+    multiply_section = raw.get("multiply") if isinstance(raw.get("multiply"), dict) else {}
+    auto_context = int(multiply_section.get("auto_context", 0))
+    return MultiplyConfig(auto_context=max(0, auto_context))
 
 
 def _load_optional_path(raw: dict, key: str, default: Path) -> Path:
@@ -102,6 +134,14 @@ provider = "cursor"
 [integrations.doclog]
 enabled = true
 home = "~/.doclog"
+
+[integrations.git]
+enabled = false
+# repo = "."
+# since_days = 7
+
+[multiply]
+# auto_context = 2
 """
 
 
@@ -119,8 +159,10 @@ def load_config(config_path: Path | None = None) -> StoryOSConfig:
             outputs_path=data_path / "outputs",
             script_prompt_path=bundled_prompt_path(),
             llm=load_llm_config({}),
+            multiply=MultiplyConfig(auto_context=0),
             editor=None,
             doclog=DoclogConfig(enabled=True, home=_default_doclog_home()),
+            git=GitConfig(enabled=False, repo=None, since_days=7),
         )
 
     with path.open("rb") as handle:
@@ -150,8 +192,10 @@ def load_config(config_path: Path | None = None) -> StoryOSConfig:
         outputs_path=_load_optional_path(outputs_section, "path", data_path / "outputs"),
         script_prompt_path=script_prompt_path,
         llm=load_llm_config(raw),
+        multiply=_load_multiply_config(raw),
         editor=editor,
         doclog=_load_doclog_config(raw),
+        git=_load_git_config(raw),
     )
 
 

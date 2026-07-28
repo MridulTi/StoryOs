@@ -4,6 +4,7 @@ from pathlib import Path
 
 from storyos.capture.manual import capture_from_text
 from storyos.engine.analyzer import analyze_memory
+from storyos.multiply.formats import ALL_FORMATS
 from storyos.multiply.source import build_story_bundle, build_story_source
 from storyos.multiply.templates import render_all, render_reel_script, render_youtube_script
 from storyos.multiply.writer import write_script
@@ -73,7 +74,7 @@ def test_render_all_formats() -> None:
     assert candidate is not None
     source = build_story_source(candidate, memory)
     scripts = render_all(source)
-    assert set(scripts) == {"reel", "shorts", "youtube"}
+    assert set(scripts) == set(ALL_FORMATS)
 
 
 def test_write_script_to_outputs(tmp_path) -> None:

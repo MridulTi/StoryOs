@@ -7,11 +7,10 @@ from typing import Annotated, Optional
 import typer
 
 from storyos.cli.formatting import format_story_detail, format_story_summary, parse_since_days
-from storyos.config import StoryOSConfig
 from storyos.engine.discover import discover_memories
 from storyos.models.story import STORY_STATUS_ACTIVE, STORY_STATUS_DISMISSED, STORY_STATUS_PICKED
-from storyos.store.memory_store import MemoryStore
-from storyos.store.story_store import StoryStore
+from storyos.patterns.themes import cluster_themes, find_resurfacing_candidates
+from storyos.runtime import load_runtime
 
 
 def register_discovery_commands(
@@ -34,10 +33,14 @@ def register_discovery_commands(
             bool,
             typer.Option("--force", help="Re-analyze dismissed or existing candidates."),
         ] = False,
+        resurface: Annotated[
+            bool,
+            typer.Option("--resurface", help="Show stories that match recurring themes."),
+        ] = False,
         config: Annotated[Optional[Path], typer.Option("--config")] = None,
     ) -> None:
         """Analyze captures and discover story candidates."""
-        settings, memory_store, story_store = load_runtime(config)
+        runtime = load_runtime(config)
         try:
             since_days = parse_since_days(since)
         except ValueError as exc:
@@ -46,8 +49,8 @@ def register_discovery_commands(
 
         try:
             result = discover_memories(
-                memory_store,
-                story_store,
+                runtime.memory_store,
+                runtime.story_store,
                 since_days=since_days,
                 memory_id=memory_id,
                 force=force,
@@ -66,18 +69,43 @@ def register_discovery_commands(
             typer.echo("")
             typer.echo("Next: storyos stories list")
 
+        if resurface:
+            resurfaced = find_resurfacing_candidates(
+                memory_store=runtime.memory_store,
+                story_store=runtime.story_store,
+            )
+            if resurfaced:
+                typer.echo("")
+                typer.echo("Resurfaced stories:")
+                for candidate, memory, reason in resurfaced:
+                    typer.echo(f"  {candidate.short_id()}  {reason}  {candidate.title}")
+
     @app.command("today")
     def today_command(
         config: Annotated[Optional[Path], typer.Option("--config")] = None,
     ) -> None:
         """Discover and show meaningful moments from recent captures."""
-        settings, memory_store, story_store = load_runtime(config)
-        discover_memories(memory_store, story_store, since_days=2, force=False)
+        runtime = load_runtime(config)
+        discover_memories(runtime.memory_store, runtime.story_store, since_days=2, force=False)
 
-        candidates = story_store.list_candidates(min_score=50, status=STORY_STATUS_ACTIVE, limit=10)
-        recent_memories = memory_store.list_since(datetime.now() - timedelta(days=2))
+        candidates = runtime.story_store.list_candidates(
+            min_score=50,
+            status=STORY_STATUS_ACTIVE,
+            limit=10,
+        )
+        recent_memories = runtime.memory_store.list_since(datetime.now() - timedelta(days=2))
         typer.echo(f"Recent captures: {len(recent_memories)}")
         typer.echo(f"Story candidates: {len(candidates)}")
+
+        patterns = cluster_themes(
+            memory_store=runtime.memory_store,
+            story_store=runtime.story_store,
+            limit=3,
+        )
+        if patterns:
+            typer.echo("Recurring themes:")
+            for pattern in patterns:
+                typer.echo(f"  {pattern.theme} ({pattern.count}x)")
         typer.echo("")
 
         if not candidates:
@@ -87,30 +115,16 @@ def register_discovery_commands(
 
         typer.echo(f"{'ID':<10} {'SCORE':<8} {'WHEN':<17} {'CATEGORIES':<18} TITLE")
         typer.echo("-" * 90)
-        memory_times = {
-            memory.id: memory.captured_at
-            for memory in recent_memories
-        }
+        memory_times = {memory.id: memory.captured_at for memory in recent_memories}
         for candidate in candidates:
             when = memory_times.get(candidate.memory_id, candidate.discovered_at)
-            typer.echo(format_story_summary(candidate, when=when, datetime_format=settings.datetime_format))
-
-
-def register_develop_alias(app: typer.Typer, *, load_runtime) -> None:
-    @app.command("develop")
-    def develop_command(
-        story_id: Annotated[str, typer.Argument(help="Story id or memory id prefix.")],
-        config: Annotated[Optional[Path], typer.Option("--config")] = None,
-    ) -> None:
-        """Alias for `storyos stories pick`."""
-        _, _, story_store = load_runtime(config)
-        candidate = _resolve_candidate(story_store, story_id)
-        if candidate is None:
-            typer.echo(f"Story not found: {story_id}", err=True)
-            raise typer.Exit(code=1)
-        story_store.set_status(candidate.id, STORY_STATUS_PICKED)
-        typer.echo(f"Picked story {candidate.short_id()}: {candidate.title}")
-        typer.echo("Generate scripts: storyos multiply all " + candidate.short_id())
+            typer.echo(
+                format_story_summary(
+                    candidate,
+                    when=when,
+                    datetime_format=runtime.settings.datetime_format,
+                )
+            )
 
 
 def register_story_commands(
@@ -128,9 +142,9 @@ def register_story_commands(
         config: Annotated[Optional[Path], typer.Option("--config")] = None,
     ) -> None:
         """List discovered story candidates."""
-        settings, memory_store, story_store = load_runtime(config)
+        runtime = load_runtime(config)
         status = None if include_dismissed else STORY_STATUS_ACTIVE
-        candidates = story_store.list_candidates(
+        candidates = runtime.story_store.list_candidates(
             min_score=min_score,
             category=category,
             status=status,
@@ -143,9 +157,15 @@ def register_story_commands(
         typer.echo(f"{'ID':<10} {'SCORE':<8} {'WHEN':<17} {'CATEGORIES':<18} TITLE")
         typer.echo("-" * 90)
         for candidate in candidates:
-            memory = memory_store.get(candidate.memory_id)
+            memory = runtime.memory_store.get(candidate.memory_id)
             when = memory.captured_at if memory else candidate.discovered_at
-            typer.echo(format_story_summary(candidate, when=when, datetime_format=settings.datetime_format))
+            typer.echo(
+                format_story_summary(
+                    candidate,
+                    when=when,
+                    datetime_format=runtime.settings.datetime_format,
+                )
+            )
 
     @stories_app.command("show")
     def stories_show_command(
@@ -153,15 +173,15 @@ def register_story_commands(
         config: Annotated[Optional[Path], typer.Option("--config")] = None,
     ) -> None:
         """Show one story candidate with scoring breakdown."""
-        _, memory_store, story_store = load_runtime(config)
-        candidate = story_store.get(story_id)
+        runtime = load_runtime(config)
+        candidate = runtime.story_store.get(story_id)
         if candidate is None:
-            candidate = story_store.get_by_memory_id(story_id)
+            candidate = runtime.story_store.get_by_memory_id(story_id)
         if candidate is None:
             typer.echo(f"Story not found: {story_id}", err=True)
             raise typer.Exit(code=1)
 
-        memory = memory_store.get(candidate.memory_id)
+        memory = runtime.memory_store.get(candidate.memory_id)
         preview = None
         if memory:
             preview = memory.content.strip()
@@ -169,18 +189,29 @@ def register_story_commands(
                 preview = preview[:397] + "..."
         typer.echo(format_story_detail(candidate, memory_preview=preview))
 
+        developed = runtime.developed_store.get_by_candidate(candidate.id)
+        if developed and developed.interview:
+            typer.echo("")
+            typer.echo("interview:")
+            for item in developed.interview:
+                typer.echo(f"  Q: {item.question}")
+                answer = item.answer.replace("\n", " ")
+                if len(answer) > 120:
+                    answer = answer[:117] + "..."
+                typer.echo(f"  A: {answer}")
+
     @stories_app.command("dismiss")
     def stories_dismiss_command(
         story_id: Annotated[str, typer.Argument(help="Story id or memory id prefix.")],
         config: Annotated[Optional[Path], typer.Option("--config")] = None,
     ) -> None:
         """Dismiss a story candidate."""
-        _, _, story_store = load_runtime(config)
-        candidate = _resolve_candidate(story_store, story_id)
+        runtime = load_runtime(config)
+        candidate = _resolve_candidate(runtime.story_store, story_id)
         if candidate is None:
             typer.echo(f"Story not found: {story_id}", err=True)
             raise typer.Exit(code=1)
-        story_store.set_status(candidate.id, STORY_STATUS_DISMISSED)
+        runtime.story_store.set_status(candidate.id, STORY_STATUS_DISMISSED)
         typer.echo(f"Dismissed story {candidate.short_id()}: {candidate.title}")
 
     @stories_app.command("pick")
@@ -189,17 +220,17 @@ def register_story_commands(
         config: Annotated[Optional[Path], typer.Option("--config")] = None,
     ) -> None:
         """Mark a story candidate as picked for development."""
-        _, _, story_store = load_runtime(config)
-        candidate = _resolve_candidate(story_store, story_id)
+        runtime = load_runtime(config)
+        candidate = _resolve_candidate(runtime.story_store, story_id)
         if candidate is None:
             typer.echo(f"Story not found: {story_id}", err=True)
             raise typer.Exit(code=1)
-        story_store.set_status(candidate.id, STORY_STATUS_PICKED)
+        runtime.story_store.set_status(candidate.id, STORY_STATUS_PICKED)
         typer.echo(f"Picked story {candidate.short_id()}: {candidate.title}")
-        typer.echo("Generate scripts: storyos multiply all " + candidate.short_id())
+        typer.echo(f"Develop it: storyos develop {candidate.short_id()}")
 
 
-def _resolve_candidate(story_store: StoryStore, story_id: str):
+def _resolve_candidate(story_store, story_id: str):
     candidate = story_store.get(story_id)
     if candidate is None:
         candidate = story_store.get_by_memory_id(story_id)
