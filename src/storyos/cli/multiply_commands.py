@@ -9,11 +9,9 @@ from storyos.cli.discovery_commands import _resolve_candidate
 from storyos.llm.base import ProviderError
 from storyos.llm.registry import PROVIDER_NAMES
 from storyos.multiply.generator import generate_script_content
-from storyos.multiply.source import build_story_bundle, build_story_source
+from storyos.multiply.source import StoryBundle, build_story_bundle, build_story_source
 from storyos.multiply.templates import SUPPORTED_FORMATS
 from storyos.multiply.writer import write_all_scripts, write_generation_outputs
-
-_STORY_IDS_HELP = "Main story id first, then optional background story ids."
 
 
 def register_multiply_commands(
@@ -21,9 +19,7 @@ def register_multiply_commands(
     *,
     load_runtime,
 ) -> None:
-    multiply_app = typer.Typer(
-        help="Create scripts from a discovered story. Pass extra ids for background context.",
-    )
+    multiply_app = typer.Typer(help="Create scripts from a discovered story.")
     app.add_typer(multiply_app, name="multiply")
 
     @multiply_app.callback(invoke_without_command=True)
@@ -34,7 +30,10 @@ def register_multiply_commands(
 
     @multiply_app.command("reel")
     def multiply_reel_command(
-        story_ids: Annotated[list[str], typer.Argument(help=_STORY_IDS_HELP)],
+        story_ids: Annotated[
+            list[str],
+            typer.Argument(help="Main story id first, then optional background story ids."),
+        ],
         output: Annotated[
             Optional[Path],
             typer.Option("--output", "-o", help="Write script to this file path."),
@@ -72,7 +71,10 @@ def register_multiply_commands(
 
     @multiply_app.command("shorts")
     def multiply_shorts_command(
-        story_ids: Annotated[list[str], typer.Argument(help=_STORY_IDS_HELP)],
+        story_ids: Annotated[
+            list[str],
+            typer.Argument(help="Main story id first, then optional background story ids."),
+        ],
         output: Annotated[Optional[Path], typer.Option("--output", "-o")] = None,
         config: Annotated[Optional[Path], typer.Option("--config")] = None,
         provider: Annotated[Optional[str], typer.Option("--provider")] = None,
@@ -95,7 +97,10 @@ def register_multiply_commands(
 
     @multiply_app.command("youtube")
     def multiply_youtube_command(
-        story_ids: Annotated[list[str], typer.Argument(help=_STORY_IDS_HELP)],
+        story_ids: Annotated[
+            list[str],
+            typer.Argument(help="Main story id first, then optional background story ids."),
+        ],
         output: Annotated[Optional[Path], typer.Option("--output", "-o")] = None,
         config: Annotated[Optional[Path], typer.Option("--config")] = None,
         provider: Annotated[Optional[str], typer.Option("--provider")] = None,
@@ -118,7 +123,10 @@ def register_multiply_commands(
 
     @multiply_app.command("all")
     def multiply_all_command(
-        story_ids: Annotated[list[str], typer.Argument(help=_STORY_IDS_HELP)],
+        story_ids: Annotated[
+            list[str],
+            typer.Argument(help="Main story id first, then optional background story ids."),
+        ],
         output_dir: Annotated[
             Optional[Path],
             typer.Option("--output-dir", "-o", help="Directory for all generated scripts."),
@@ -167,10 +175,7 @@ def register_multiply_commands(
             prompts=prompts if save_prompt or prompt_only else None,
         )
 
-        typer.echo(f"Generated scripts for: {bundle.main.title}")
-        if bundle.context:
-            background = ", ".join(item.candidate.short_id() for item in bundle.context)
-            typer.echo(f"  background: {background}")
+        typer.echo(_bundle_summary(bundle))
         if provider_used:
             mode = "AI" if used_ai else provider_used
             typer.echo(f"  provider: {mode}")
@@ -193,10 +198,6 @@ def _run_multiply(
     save_prompt: bool,
     load_runtime,
 ) -> None:
-    if not story_ids:
-        typer.echo("Pass at least one story id.", err=True)
-        raise typer.Exit(code=1)
-
     settings, memory_store, story_store = load_runtime(config)
     bundle = _load_story_bundle(story_store, memory_store, story_ids)
 
@@ -226,10 +227,7 @@ def _run_multiply(
     )
 
     mode = "AI" if result.used_ai else result.provider
-    typer.echo(f"Generated {fmt} script for: {bundle.main.title}")
-    if bundle.context:
-        background = ", ".join(item.candidate.short_id() for item in bundle.context)
-        typer.echo(f"  background: {background}")
+    typer.echo(_bundle_summary(bundle, fmt=fmt))
     typer.echo(f"  provider: {mode}")
     typer.echo(f"  file: {paths['script']}")
     if paths.get("prompt"):
@@ -237,27 +235,45 @@ def _run_multiply(
 
 
 def _load_story_bundle(story_store, memory_store, story_ids: list[str]) -> StoryBundle:
-    candidate, memory = _load_story_pair(story_store, memory_store, story_ids[0], label="Story")
-    main = build_story_source(candidate, memory)
-    context: list = []
-    for story_id in story_ids[1:]:
-        ctx_candidate, ctx_memory = _load_story_pair(
-            story_store,
-            memory_store,
-            story_id,
-            label="Background story",
-        )
-        context.append(build_story_source(ctx_candidate, ctx_memory))
-    return build_story_bundle(main, *context)
+    if not story_ids:
+        typer.echo("At least one story id is required.", err=True)
+        raise typer.Exit(code=1)
+
+    seen: set[str] = set()
+    sources = []
+    for story_id in story_ids:
+        normalized = story_id.strip()
+        if not normalized:
+            continue
+        if normalized in seen:
+            typer.echo(f"Duplicate story id: {normalized}", err=True)
+            raise typer.Exit(code=1)
+        seen.add(normalized)
+
+        candidate = _resolve_candidate(story_store, normalized)
+        if candidate is None:
+            typer.echo(f"Story not found: {normalized}", err=True)
+            raise typer.Exit(code=1)
+        memory = memory_store.get(candidate.memory_id)
+        if memory is None:
+            typer.echo(f"Memory not found for story: {normalized}", err=True)
+            raise typer.Exit(code=1)
+        sources.append(build_story_source(candidate, memory))
+
+    if not sources:
+        typer.echo("At least one story id is required.", err=True)
+        raise typer.Exit(code=1)
+
+    return build_story_bundle(sources[0], *sources[1:])
 
 
-def _load_story_pair(story_store, memory_store, story_id: str, *, label: str):
-    candidate = _resolve_candidate(story_store, story_id)
-    if candidate is None:
-        typer.echo(f"{label} not found: {story_id}", err=True)
-        raise typer.Exit(code=1)
-    memory = memory_store.get(candidate.memory_id)
-    if memory is None:
-        typer.echo(f"Memory not found for {label.lower()}: {story_id}", err=True)
-        raise typer.Exit(code=1)
-    return candidate, memory
+def _bundle_summary(bundle: StoryBundle, *, fmt: str | None = None) -> str:
+    if fmt:
+        prefix = f"Generated {fmt} script for"
+    else:
+        prefix = "Generated scripts for"
+    line = f"{prefix}: {bundle.main.title}"
+    if bundle.context:
+        background = ", ".join(item.title for item in bundle.context)
+        line += f"\n  background: {background}"
+    return line

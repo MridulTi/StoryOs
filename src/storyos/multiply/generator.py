@@ -21,7 +21,7 @@ class GenerationResult:
 
 
 def generate_script_content(
-    bundle: StoryBundle,
+    source: StoryBundle | StorySource,
     fmt: str,
     *,
     llm: LLMConfig,
@@ -30,7 +30,7 @@ def generate_script_content(
     prompt_only: bool = False,
     use_template: bool = False,
 ) -> GenerationResult:
-    prompt = build_generation_prompt(bundle, fmt, script_prompt_path=script_prompt_path)
+    prompt = build_generation_prompt(source, fmt, script_prompt_path=script_prompt_path)
     provider_name = resolve_provider_name(
         provider_override,
         prompt_only=prompt_only,
@@ -39,16 +39,11 @@ def generate_script_content(
     )
 
     if provider_name == "template":
-        content = render_script(bundle, fmt, prompt_path=script_prompt_path)
+        content = render_script(source, fmt, prompt_path=script_prompt_path)
         return GenerationResult(content=content, provider="template", prompt=prompt, used_ai=False)
 
     if provider_name == "prompt_only":
-        content = _prompt_only_markdown(
-            prompt,
-            bundle=bundle,
-            fmt=fmt,
-            script_prompt_path=script_prompt_path,
-        )
+        content = _prompt_only_markdown(prompt, source=source, fmt=fmt, script_prompt_path=script_prompt_path)
         return GenerationResult(content=content, provider="prompt_only", prompt=prompt, used_ai=False)
 
     provider = get_provider(provider_name, llm)
@@ -60,7 +55,7 @@ def generate_script_content(
     body = provider.generate(prompt)
     content = wrap_generated_script(
         body,
-        bundle=bundle,
+        source=source,
         fmt=fmt,
         provider=provider_name,
         prompt_path=script_prompt_path,
@@ -71,17 +66,19 @@ def generate_script_content(
 def _prompt_only_markdown(
     prompt: str,
     *,
-    bundle: StoryBundle,
+    source: StoryBundle | StorySource,
     fmt: str,
     script_prompt_path: Path,
 ) -> str:
-    source = bundle.main
+    from storyos.multiply.source import as_bundle
+
+    bundle = as_bundle(source)
+    main = bundle.main
     context_line = ""
     if bundle.context:
-        ids = ", ".join(item.candidate.short_id() for item in bundle.context)
-        context_line = f"\n- background stories: `{ids}`"
+        context_line = f"\n- background stories: `{', '.join(bundle.context_story_ids())}`"
 
-    return f"""# Script generation prompt — {source.title}
+    return f"""# Script generation prompt — {main.title}
 
 > Provider: prompt_only  
 > Format: {fmt}  
@@ -97,7 +94,7 @@ def _prompt_only_markdown(
 
 ## Metadata
 
-- main story: `{source.candidate.id}`
-- main memory: `{source.memory.id}`{context_line}
+- main story: `{main.candidate.id}`
+- main memory: `{main.memory.id}`{context_line}
 - script prompt file: `{script_prompt_path}`
 """

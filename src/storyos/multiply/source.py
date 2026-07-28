@@ -51,25 +51,38 @@ class StorySource:
 
 @dataclass(frozen=True)
 class StoryBundle:
-    """Main story plus optional background/context stories."""
+    """Main story plus optional background stories for script generation."""
 
     main: StorySource
     context: tuple[StorySource, ...] = ()
 
     @property
-    def title(self) -> str:
-        return self.main.title
+    def source(self) -> StorySource:
+        return self.main
 
-    def background_text(self, *, limit: int = 1200) -> str:
-        """Combined text from background stories only."""
+    def background_text(self) -> str:
         if not self.context:
-            return _trim(self.main.context, limit)
-
+            return self.main.context
         parts: list[str] = []
         for item in self.context:
-            parts.append(f"{item.title}\n{item.memory.content.strip()}")
-        combined = "\n\n".join(part.strip() for part in parts if part.strip())
-        return _trim(combined, limit) if limit else combined
+            parts.append(f"### {item.title}\n{item.memory.content.strip()}")
+        return "\n\n".join(parts)
+
+    def context_story_ids(self) -> list[str]:
+        return [item.candidate.short_id() for item in self.context]
+
+
+def build_story_bundle(
+    main: StorySource,
+    *context: StorySource,
+) -> StoryBundle:
+    return StoryBundle(main=main, context=context)
+
+
+def as_bundle(source: StoryBundle | StorySource) -> StoryBundle:
+    if isinstance(source, StoryBundle):
+        return source
+    return StoryBundle(main=source)
 
 
 def build_story_source(candidate: StoryCandidate, memory: Memory) -> StorySource:
@@ -84,17 +97,6 @@ def build_story_source(candidate: StoryCandidate, memory: Memory) -> StorySource
         remember=fields.remember,
         body=body,
     )
-
-
-def build_story_bundle(main: StorySource, *context: StorySource) -> StoryBundle:
-    seen = {main.memory.id}
-    background: list[StorySource] = []
-    for item in context:
-        if item.memory.id in seen:
-            continue
-        seen.add(item.memory.id)
-        background.append(item)
-    return StoryBundle(main=main, context=tuple(background))
 
 
 def _strip_structured_header(content: str) -> str:

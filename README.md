@@ -38,8 +38,7 @@ storyos capture          # opens your editor with a template
 storyos sync doclog      # import DocLogs entries as story memories
 storyos discover         # analyze captures and find story candidates
 storyos stories list     # review scored stories
-storyos multiply all <story-id>   # reel + shorts + youtube (AI via Cursor)
-storyos multiply all <main-id> <bg-id>...   # main story + background context
+storyos multiply all <main-story-id> [background-story-ids...]
 storyos today            # recent meaningful moments
 storyos memories list
 storyos memories show <id>
@@ -74,10 +73,11 @@ Check active paths anytime: `storyos config path`
 `storyos multiply` uses your configured LLM to turn a discovered story into cinematic scripts. By default it calls the **Cursor CLI** (`agent`), matching DocLogs if you already use it.
 
 ```bash
-storyos multiply reel <story-id>              # Cursor AI (default)
-storyos multiply all <story-id> --provider openai
-storyos multiply reel <story-id> --template   # old template-only output
-storyos multiply reel <story-id> --prompt-only --save-prompt
+storyos multiply reel <main-id>                 # Cursor AI (default)
+storyos multiply all <main-id> <bg-id> <bg-id>  # main story + background context
+storyos multiply all <main-id> --provider openai
+storyos multiply reel <main-id> --template      # template-only output
+storyos multiply reel <main-id> --prompt-only --save-prompt
 ```
 
 Configure in `storyos.toml`:
@@ -97,12 +97,12 @@ model = "gpt-4o-mini"
 
 If `[cursor]` / `[copilot]` are omitted, StoryOS inherits them from `~/.doclog/config.yaml`. The script structure follows your `[outputs].script_prompt` file (e.g. `storypromt.md`). AI is instructed to **never invent experiences** — only reshape your captured memory.
 
-**Multiple stories:** pass the main story id first, then background ids:
+**Main + background stories:** pass the emotional arc first, then supporting captures:
 
 ```bash
 storyos multiply all abc123 def456 ghi789
-# abc123 = emotional arc (stuck and tired)
-# def456, ghi789 = oncall pages, late-night calls (context only)
+# abc123 = main story ("feeling stuck and tired")
+# def456, ghi789 = background (oncall pages, late-night calls)
 ```
 
 **DocLogs:** if you use [DocLogs](https://github.com/MridulTi/DocLogs) (`doclog capture`), run `storyos sync doclog` to index `~/.doclog/entries/*.yaml` as StoryOS memories — same data, story discovery on top.

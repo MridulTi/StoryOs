@@ -19,6 +19,25 @@ remember: Nobody asked me to sacrifice myself.
 Got paged at 2AM and could not sleep afterwards.
 """
 
+ONCALL_SAMPLE = """\
+topic: Oncall page at 2AM
+impact: Could not sleep after fixing someone else's issue.
+blockers: Slack kept buzzing. Laptop glow in a dark room.
+"""
+
+
+def _sample_bundle():
+    main_memory = capture_from_text(SAMPLE, source="doclog")
+    bg_memory = capture_from_text(ONCALL_SAMPLE, source="doclog")
+    main_candidate = analyze_memory(main_memory)
+    bg_candidate = analyze_memory(bg_memory)
+    assert main_candidate is not None
+    assert bg_candidate is not None
+    return build_story_bundle(
+        build_story_source(main_candidate, main_memory),
+        build_story_source(bg_candidate, bg_memory),
+    )
+
 
 def _sample_source():
     memory = capture_from_text(SAMPLE, source="doclog")
@@ -27,15 +46,22 @@ def _sample_source():
     return build_story_source(candidate, memory)
 
 
-def _sample_bundle():
-    return build_story_bundle(_sample_source())
+def test_build_generation_prompt_includes_background_stories(tmp_path) -> None:
+    prompt_path = tmp_path / "storypromt.md"
+    prompt_path.write_text("# Script rules\nNever invent experiences.", encoding="utf-8")
+    bundle = _sample_bundle()
+    prompt = build_generation_prompt(bundle, "reel", script_prompt_path=prompt_path)
+    assert "Main story (emotional arc" in prompt
+    assert "Background context" in prompt
+    assert "Oncall page at 2AM" in prompt
+    assert "Nobody asked me to sacrifice myself" in prompt
 
 
 def test_build_generation_prompt_includes_source_only_rules(tmp_path) -> None:
     prompt_path = tmp_path / "storypromt.md"
     prompt_path.write_text("# Script rules\nNever invent experiences.", encoding="utf-8")
-    bundle = _sample_bundle()
-    prompt = build_generation_prompt(bundle, "reel", script_prompt_path=prompt_path)
+    source = _sample_source()
+    prompt = build_generation_prompt(source, "reel", script_prompt_path=prompt_path)
     assert "Never invent experiences" in prompt
     assert "Nobody asked me to sacrifice myself" in prompt
     assert "Production incident after hours" in prompt
@@ -50,9 +76,9 @@ def test_resolve_provider_name_flags() -> None:
 def test_generate_with_template_fallback(tmp_path) -> None:
     prompt_path = tmp_path / "storypromt.md"
     prompt_path.write_text("# rules", encoding="utf-8")
-    bundle = _sample_bundle()
+    source = _sample_source()
     result = generate_script_content(
-        bundle,
+        source,
         "reel",
         llm=LLMConfig(),
         script_prompt_path=prompt_path,
@@ -66,14 +92,14 @@ def test_generate_with_template_fallback(tmp_path) -> None:
 def test_generate_with_mock_cursor_provider(tmp_path) -> None:
     prompt_path = tmp_path / "storypromt.md"
     prompt_path.write_text("# rules", encoding="utf-8")
-    bundle = _sample_bundle()
+    source = _sample_source()
     provider = MagicMock()
     provider.is_available.return_value = True
     provider.generate.return_value = "## Hook\nA real moment.\n\n## Full Script\nScene one."
 
     with patch("storyos.multiply.generator.get_provider", return_value=provider):
         result = generate_script_content(
-            bundle,
+            source,
             "reel",
             llm=LLMConfig(provider="cursor"),
             script_prompt_path=prompt_path,

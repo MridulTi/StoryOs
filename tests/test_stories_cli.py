@@ -16,6 +16,42 @@ remember: Nobody asked me to sacrifice myself.
 Got paged at 2AM and could not sleep afterwards.
 """
 
+STUCK_SAMPLE = """\
+topic: Feeling stuck and tired
+impact: Realized I'm depleted, not lazy.
+remember: This has been building for weeks.
+"""
+
+
+def test_multiply_with_background_story_ids(tmp_path: Path) -> None:
+    config_path = tmp_path / "storyos.toml"
+    data_path = tmp_path / "data"
+    config_args = ["--config", str(config_path)]
+
+    runner.invoke(app, ["init", *config_args, "--data-path", str(data_path)])
+
+    runner.invoke(app, ["capture", STUCK_SAMPLE, *config_args, "--source", "doclog"])
+    runner.invoke(app, ["capture", DOCLOG_SAMPLE, *config_args, "--source", "doclog"])
+    runner.invoke(app, ["discover", *config_args])
+
+    list_result = runner.invoke(app, ["stories", "list", *config_args, "--min-score", "40"])
+    assert list_result.exit_code == 0, list_result.output
+
+    story_ids = [
+        line.split()[0]
+        for line in list_result.stdout.splitlines()
+        if line and not line.startswith("-") and "SCORE" not in line and "ID" not in line
+    ]
+    assert len(story_ids) >= 2
+
+    main_id, bg_id = story_ids[0], story_ids[1]
+    multiply_result = runner.invoke(
+        app,
+        ["multiply", "reel", main_id, bg_id, *config_args, "--template"],
+    )
+    assert multiply_result.exit_code == 0, multiply_result.output
+    assert "background:" in multiply_result.stdout
+
 
 def test_discover_and_stories_flow(tmp_path: Path) -> None:
     config_path = tmp_path / "storyos.toml"
